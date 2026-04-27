@@ -1,0 +1,2 @@
+0 Buen Estado
+1 Defectuosas
