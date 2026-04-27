@@ -1,2 +1,3 @@
 0 Buen Estado
 1 Defectuosas
+2 Desconocido
