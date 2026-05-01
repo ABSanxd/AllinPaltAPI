@@ -9,9 +9,9 @@ import tf_keras  # Keras 2.x — compatible con modelos Teachable Machine (.h5 d
 
 # ── Rutas ────────────────────────────────────────────────────────────────────
 _BASE = os.path.dirname(__file__)
-MODEL_PATH      = os.path.join(_BASE, "..", "modelo", "keras_model.h5")
-LABELS_PATH     = os.path.join(_BASE, "..", "modelo", "labels.txt")
-RESULTADOS_PATH = os.path.join(_BASE, "..", "resultados.json")
+MODEL_PATH      = os.path.join(_BASE, "..", "ml_models", "keras_model.h5")
+LABELS_PATH     = os.path.join(_BASE, "..", "ml_models", "labels.txt")
+RESULTADOS_PATH = os.path.join(_BASE, "..", "..", "resultados.json")
 
 # Tamaño de entrada estándar de Teachable Machine
 IMG_SIZE = (224, 224)
