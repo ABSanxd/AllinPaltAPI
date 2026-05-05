@@ -38,7 +38,7 @@ def _leer_args() -> argparse.Namespace:
 
 def _enviar_imagen(api_url: str, imagen_bytes: bytes) -> None:
     """Envía los bytes de imagen al endpoint /analizar-imagen."""
-    endpoint = f"{api_url.rstrip('/')}/captura/analizar-imagen"
+    endpoint = f"{api_url.rstrip('/')}/api/v1/captura/analizar-imagen"
     try:
         response = requests.post(
             endpoint,

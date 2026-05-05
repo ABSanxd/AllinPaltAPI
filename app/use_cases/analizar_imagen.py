@@ -3,18 +3,16 @@ import os
 import json
 import threading
 import datetime
+import cv2
 import numpy as np
 from PIL import Image
-import tf_keras  # Keras 2.x — compatible con modelos Teachable Machine (.h5 de TF2)
+from ultralytics import YOLO
 
 # ── Rutas ────────────────────────────────────────────────────────────────────
 _BASE = os.path.dirname(__file__)
-MODEL_PATH      = os.path.join(_BASE, "..", "ml_models", "keras_model.h5")
-LABELS_PATH     = os.path.join(_BASE, "..", "ml_models", "labels.txt")
+# Usaremos best.pt que es el nombre estándar de exportación de Roboflow/YOLO
+MODEL_PATH      = os.path.join(_BASE, "..", "ml_models", "best.pt")
 RESULTADOS_PATH = os.path.join(_BASE, "..", "..", "resultados.json")
-
-# Tamaño de entrada estándar de Teachable Machine
-IMG_SIZE = (224, 224)
 
 # Lock para escritura concurrente en el JSON
 _json_lock = threading.Lock()
@@ -22,75 +20,46 @@ _json_lock = threading.Lock()
 
 class AnalizarImagen:
     """
-    Caso de uso: clasifica una imagen de palta usando el modelo
-    entrenado con Teachable Machine.
-
-    Clasificaciones posibles:
-        "Buen Estado"  → palta en buen estado
-        "Defectuosas"  → palta defectuosa
-        "Desconocido"  → objeto no reconocido (no es palta)
-
-    Uso:
-        caso_uso = AnalizarImagen()
-        clasificacion: str = caso_uso.execute(imagen_bytes)
+    Caso de uso: detecta y clasifica paltas usando YOLOv11.
+    Migrado de Teachable Machine (Keras) a Ultralytics.
     """
 
     def __init__(self) -> None:
-        self._modelo: tf_keras.Model = self._cargar_modelo()
-        self._etiquetas: dict[int, str] = self._cargar_etiquetas()
+        self._modelo = self._cargar_modelo()
 
     # ── Métodos privados ──────────────────────────────────────────────────────
 
-    def _cargar_modelo(self) -> tf_keras.Model:
-        """Carga el modelo .h5 desde disco (compatible con Teachable Machine / TF2)."""
-        return tf_keras.models.load_model(MODEL_PATH, compile=False)
+    def _cargar_modelo(self):
+        """Carga el modelo .pt de YOLO."""
+        if not os.path.exists(MODEL_PATH):
+            print(f"⚠️  ADVERTENCIA: No se encontró el modelo en {MODEL_PATH}")
+            return None
+        return YOLO(MODEL_PATH)
 
-    def _cargar_etiquetas(self) -> dict[int, str]:
+    def _procesar(self, imagen_bytes: bytes):
         """
-        Lee labels.txt y devuelve {índice: nombre_clase}.
-        Formato esperado:
-            0 Buen Estado
-            1 Defectuosas
-            2 Desconocido
+        Ejecuta la inferencia de YOLO sobre los bytes de la imagen.
         """
-        etiquetas: dict[int, str] = {}
-        with open(LABELS_PATH, "r", encoding="utf-8") as f:
-            for linea in f:
-                linea = linea.strip()
-                if not linea:
-                    continue
-                partes = linea.split(" ", 1)
-                etiquetas[int(partes[0])] = partes[1]
-        return etiquetas
+        if self._modelo is None:
+            return "Error: Modelo no cargado"
 
-    def _preprocesar_imagen(self, imagen_bytes: bytes) -> np.ndarray:
-        """
-        Convierte los bytes de la imagen al tensor de entrada:
-        - Redimensiona a 224×224
-        - Convierte a RGB
-        - Normaliza píxeles al rango [-1, 1]  (estándar Teachable Machine)
-        - Añade la dimensión de batch
-        """
-        imagen = Image.open(io.BytesIO(imagen_bytes)).convert("RGB")
-        imagen = imagen.resize(IMG_SIZE, Image.LANCZOS)
-        array  = np.asarray(imagen, dtype=np.float32)
-        array  = (array / 127.5) - 1.0
-        return np.expand_dims(array, axis=0)  # shape (1, 224, 224, 3)
+        # Convertir bytes a imagen de OpenCV
+        nparr = np.frombuffer(imagen_bytes, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-    def _predecir(self, tensor: np.ndarray) -> int:
-        """Ejecuta la inferencia y retorna el índice de la clase con mayor confianza."""
-        prediccion = self._modelo.predict(tensor, verbose=0)
-        return int(np.argmax(prediccion[0]))
+        # Ejecutar predicción
+        # Bajamos conf a 0.25 para que sea más fácil detectar en pruebas
+        results = self._modelo.predict(source=img, conf=0.25, verbose=False)
+        
+        if len(results) == 0 or len(results[0].boxes) == 0:
+            return "Desconocido"
 
-    def _interpretar(self, indice_clase: int) -> str:
-        """
-        Mapea el índice a su etiqueta:
-            0 → "Buen Estado"
-            1 → "Defectuosas"
-            2 → "Desconocido"
-            * → "Desconocido"  (fallback)
-        """
-        return self._etiquetas.get(indice_clase, "Desconocido")
+        # Obtenemos la clase con mayor confianza de la primera detección
+        primera_deteccion = results[0].boxes[0]
+        clase_id = int(primera_deteccion.cls[0])
+        nombre_clase = self._modelo.names[clase_id]
+
+        return nombre_clase
 
     def _guardar_resultado(self, clasificacion: str) -> dict:
         """
@@ -124,17 +93,8 @@ class AnalizarImagen:
 
     def execute(self, imagen_bytes: bytes) -> str:
         """
-        Orquesta el análisis completo:
-          1. Preprocesa la imagen.
-          2. Ejecuta la inferencia.
-          3. Interpreta el resultado.
-          4. Guarda en resultados.json.
-
-        Returns:
-            "Buen Estado" | "Defectuosas" | "Desconocido"
+        Orquesta el análisis con YOLO.
         """
-        tensor        = self._preprocesar_imagen(imagen_bytes)
-        indice        = self._predecir(tensor)
-        clasificacion = self._interpretar(indice)
+        clasificacion = self._procesar(imagen_bytes)
         self._guardar_resultado(clasificacion)
         return clasificacion
