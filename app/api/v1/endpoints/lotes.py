@@ -10,9 +10,9 @@ async def crear_lote(lote: LoteCreate):
         "codigo_lote": lote.codigo_lote,
         "proveedor": lote.proveedor,
         "lugar_origen": lote.lugar_origen,
-        "fecha_cosecha": lote.fecha_cosecha,
+        "fecha_cosecha": lote.fecha_cosecha.isoformat() if lote.fecha_cosecha else None,
         "temperatura_ambiente": lote.temperatura_ambiente,
-        "estado": "en_proceso"
+        "estado": lote.estado.value
     }
     response = supabase.table("lotes").insert(data).execute()
     if not response.data:
@@ -21,5 +21,5 @@ async def crear_lote(lote: LoteCreate):
 
 @router.get("/")
 async def listar_lotes():
-    response = supabase.table("lotes").select("*").order("fecha_ingreso_planta", desc=True).execute()
+    response = supabase.table("lotes").select("*").order("created_at", desc=True).execute()
     return {"lotes": response.data}
