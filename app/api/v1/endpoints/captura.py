@@ -1,7 +1,9 @@
 import os
 import sys
 import subprocess
-from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Request
+
+from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Request, Form
+
 from app.core.process import process_manager
 from app.core.config import settings
 
@@ -12,17 +14,20 @@ async def analizar_imagen(
     request: Request,
     background_tasks: BackgroundTasks,
     imagen: UploadFile = File(...),
+    lote_id: str = Form(...),
 ):
     if not imagen.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="El archivo enviado no es una imagen válida.")
     
     imagen_bytes = await imagen.read()
     
-    # Recuperamos el caso de uso desde el estado de la app
     analizador = request.app.state.analizador
-    background_tasks.add_task(analizador.execute, imagen_bytes)
+    background_tasks.add_task(analizador.execute, imagen_bytes, lote_id)
     
-    return {"mensaje": "Imagen recibida. Análisis en proceso en background."}
+    return {
+        "mensaje": "Imagen recibida. Análisis en proceso en background.",
+        "lote_id": lote_id
+    }
 
 @router.post("/iniciar-captura")
 async def iniciar_captura():

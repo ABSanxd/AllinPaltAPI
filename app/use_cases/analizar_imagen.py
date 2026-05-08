@@ -1,100 +1,70 @@
-import io
+﻿import io
 import os
-import json
-import threading
-import datetime
 import cv2
 import numpy as np
-from PIL import Image
 from ultralytics import YOLO
+from app.core.database import supabase
 
-# ── Rutas ────────────────────────────────────────────────────────────────────
 _BASE = os.path.dirname(__file__)
-# Usaremos best.pt que es el nombre estándar de exportación de Roboflow/YOLO
-MODEL_PATH      = os.path.join(_BASE, "..", "ml_models", "best.pt")
-RESULTADOS_PATH = os.path.join(_BASE, "..", "..", "resultados.json")
-
-# Lock para escritura concurrente en el JSON
-_json_lock = threading.Lock()
+MODEL_PATH = os.path.join(_BASE, "..", "ml_models", "best.pt")
 
 
 class AnalizarImagen:
     """
-    Caso de uso: detecta y clasifica paltas usando YOLOv11.
-    Migrado de Teachable Machine (Keras) a Ultralytics.
+    Caso de uso: detecta y clasifica paltas usando YOLO.
+    Guarda el resultado en Supabase.
     """
 
     def __init__(self) -> None:
         self._modelo = self._cargar_modelo()
 
-    # ── Métodos privados ──────────────────────────────────────────────────────
-
     def _cargar_modelo(self):
         """Carga el modelo .pt de YOLO."""
         if not os.path.exists(MODEL_PATH):
-            print(f"⚠️  ADVERTENCIA: No se encontró el modelo en {MODEL_PATH}")
+            print(f"ADVERTENCIA: No se encontró el modelo en {MODEL_PATH}")
             return None
         return YOLO(MODEL_PATH)
 
-    def _procesar(self, imagen_bytes: bytes):
+    def _procesar(self, imagen_bytes: bytes) -> tuple[str, float]:
         """
-        Ejecuta la inferencia de YOLO sobre los bytes de la imagen.
+        Ejecuta inferencia YOLO y devuelve clasificación + confianza.
         """
         if self._modelo is None:
-            return "Error: Modelo no cargado"
+            return "Error: Modelo no cargado", 0.0
 
-        # Convertir bytes a imagen de OpenCV
         nparr = np.frombuffer(imagen_bytes, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-        # Ejecutar predicción
-        # Bajamos conf a 0.25 para que sea más fácil detectar en pruebas
         results = self._modelo.predict(source=img, conf=0.25, verbose=False)
-        
-        if len(results) == 0 or len(results[0].boxes) == 0:
-            return "Desconocido"
 
-        # Obtenemos la clase con mayor confianza de la primera detección
+        if len(results) == 0 or len(results[0].boxes) == 0:
+            return "Desconocido", 0.0
+
         primera_deteccion = results[0].boxes[0]
         clase_id = int(primera_deteccion.cls[0])
+        confianza = float(primera_deteccion.conf[0])
         nombre_clase = self._modelo.names[clase_id]
 
-        return nombre_clase
+        return nombre_clase, confianza
 
-    def _guardar_resultado(self, clasificacion: str) -> dict:
-        """
-        Persiste en resultados.json la clasificación junto al timestamp.
-        Usa un lock para evitar condiciones de carrera en escrituras concurrentes.
-        """
+    def _guardar_resultado(self, clasificacion: str, confianza: float, lote_id: str) -> dict:
         registro = {
-            "timestamp":     datetime.datetime.now().isoformat(),
+            "lote_id": lote_id,
             "clasificacion": clasificacion,
+            "confianza": confianza,
         }
 
-        with _json_lock:
-            # Leer registros existentes
-            if os.path.exists(RESULTADOS_PATH):
-                try:
-                    with open(RESULTADOS_PATH, "r", encoding="utf-8") as f:
-                        resultados: list = json.load(f)
-                except (json.JSONDecodeError, OSError):
-                    resultados = []
-            else:
-                resultados = []
+        response = supabase.table("detecciones").insert(registro).execute()
 
-            resultados.append(registro)
+        if not response.data:
+            raise RuntimeError("No se pudo guardar la detección en Supabase")
 
-            with open(RESULTADOS_PATH, "w", encoding="utf-8") as f:
-                json.dump(resultados, f, ensure_ascii=False, indent=2)
+        return response.data[0]
 
-        return registro
-
-    # ── Método público ────────────────────────────────────────────────────────
-
-    def execute(self, imagen_bytes: bytes) -> str:
+    def execute(self, imagen_bytes: bytes, lote_id: str) -> str:
         """
-        Orquesta el análisis con YOLO.
+        Orquesta análisis YOLO + guardado del resultado.
         """
-        clasificacion = self._procesar(imagen_bytes)
-        self._guardar_resultado(clasificacion)
+        clasificacion, confianza = self._procesar(imagen_bytes)
+        self._guardar_resultado(clasificacion, confianza, lote_id)
         return clasificacion
