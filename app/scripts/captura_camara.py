@@ -33,16 +33,18 @@ def _leer_args() -> argparse.Namespace:
     parser.add_argument("--url",       default=DEFAULT_URL,       help="URL base de la API")
     parser.add_argument("--intervalo", default=DEFAULT_INTERVALO, type=float,
                         help="Segundos entre capturas (default: 1)")
+    parser.add_argument("--lote_id",   required=True,             help="ID del lote activo en Supabase")
     return parser.parse_args()
 
 
-def _enviar_imagen(api_url: str, imagen_bytes: bytes) -> None:
+def _enviar_imagen(api_url: str, imagen_bytes: bytes, lote_id: str) -> None:
     """Envía los bytes de imagen al endpoint /analizar-imagen."""
     endpoint = f"{api_url.rstrip('/')}/api/v1/captura/analizar-imagen"
     try:
         response = requests.post(
             endpoint,
             files={"imagen": ("captura.jpg", imagen_bytes, "image/jpeg")},
+            data={"lote_id": lote_id},
             timeout=5,
         )
         print(f"[OK] Enviada -> HTTP {response.status_code} | {response.text.strip()}")
@@ -78,13 +80,13 @@ def _capturar_frame() -> bytes | None:
         cap.release()
 
 
-def bucle_captura(api_url: str, intervalo: float) -> None:
+def bucle_captura(api_url: str, intervalo: float, lote_id: str) -> None:
     """
     Bucle principal: captura y envía indefinidamente.
     Nunca lanza excepción no controlada; siempre reintenta.
     """
     print(f"[START] Captura continua -> {api_url}/analizar-imagen")
-    print(f"[INFO] Intervalo: {intervalo}s | Envia SIGTERM para detener.")
+    print(f"[INFO] Lote ID: {lote_id} | Intervalo: {intervalo}s")
 
     while True:
         inicio = time.monotonic()
@@ -95,7 +97,7 @@ def bucle_captura(api_url: str, intervalo: float) -> None:
             if imagen_bytes is None:
                 print("[WARN] Camara no disponible o frame invalido. Reintentando...")
             else:
-                _enviar_imagen(api_url, imagen_bytes)
+                _enviar_imagen(api_url, imagen_bytes, lote_id)
 
         except Exception as e:
             # Captura cualquier error inesperado para no romper el bucle
@@ -110,7 +112,7 @@ def bucle_captura(api_url: str, intervalo: float) -> None:
 if __name__ == "__main__":
     args = _leer_args()
     try:
-        bucle_captura(api_url=args.url, intervalo=args.intervalo)
+        bucle_captura(api_url=args.url, intervalo=args.intervalo, lote_id=args.lote_id)
     except KeyboardInterrupt:
         print("[STOP] Captura detenida por el usuario.")
         sys.exit(0)

@@ -6,6 +6,22 @@ class ProcessManager:
     def __init__(self):
         self.proceso_captura: Optional[subprocess.Popen] = None
         self.log_file = None
+        self.lote_id_activo: Optional[str] = None
+        # Contadores en memoria para tiempo real
+        self.total_paltas = 0
+        self.cant_buenas = 0
+        self.cant_defectuosas = 0
+        self.suma_confianza = 0.0
+        self.suma_madurez = 0.0
+        self.conteo_madurez = 0
+
+    def reset_contadores(self):
+        self.total_paltas = 0
+        self.cant_buenas = 0
+        self.cant_defectuosas = 0
+        self.suma_confianza = 0.0
+        self.suma_madurez = 0.0
+        self.conteo_madurez = 0
 
     def esta_activa(self) -> bool:
         return self.proceso_captura is not None and self.proceso_captura.poll() is None

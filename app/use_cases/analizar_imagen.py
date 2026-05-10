@@ -1,4 +1,4 @@
-﻿import io
+import io
 import os
 import cv2
 import numpy as np
@@ -47,24 +47,9 @@ class AnalizarImagen:
 
         return nombre_clase, confianza
 
-    def _guardar_resultado(self, clasificacion: str, confianza: float, lote_id: str) -> dict:
-        registro = {
-            "lote_id": lote_id,
-            "clasificacion": clasificacion,
-            "confianza": confianza,
-        }
-
-        response = supabase.table("detecciones").insert(registro).execute()
-
-        if not response.data:
-            raise RuntimeError("No se pudo guardar la detección en Supabase")
-
-        return response.data[0]
-
-    def execute(self, imagen_bytes: bytes, lote_id: str) -> str:
+    def execute(self, imagen_bytes: bytes) -> tuple[str, float]:
         """
-        Orquesta análisis YOLO + guardado del resultado.
+        Orquesta análisis YOLO y devuelve el resultado.
         """
         clasificacion, confianza = self._procesar(imagen_bytes)
-        self._guardar_resultado(clasificacion, confianza, lote_id)
-        return clasificacion
+        return clasificacion, confianza

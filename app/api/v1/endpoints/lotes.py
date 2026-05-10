@@ -21,5 +21,44 @@ async def crear_lote(lote: LoteCreate):
 
 @router.get("/")
 async def listar_lotes():
-    response = supabase.table("lotes").select("*").order("created_at", desc=True).execute()
+    """
+    Lista todos los lotes incluyendo su resumen de detecciones (Join).
+    Esto es usado por el Historial para mostrar Totales, Buenas y Malas.
+    """
+    response = supabase.table("lotes")\
+        .select("*, deteccion_resumen(*)")\
+        .order("id", desc=True)\
+        .execute()
     return {"lotes": response.data}
+
+@router.get("/{lote_id}/resumen")
+async def obtener_resumen_lote(lote_id: str):
+    """
+    Devuelve el resumen acumulado en memoria para el Dashboard.
+    Evita consultas pesadas a la base de datos por cada palta.
+    """
+    from app.core.process import process_manager
+    
+    # Solo devolvemos datos si el lote solicitado es el que está activo
+    if process_manager.lote_id_activo == lote_id:
+        return {
+            "total_paltas": process_manager.total_paltas,
+            "cant_buenas": process_manager.cant_buenas,
+            "cant_defectuosas": process_manager.cant_defectuosas
+        }
+    
+    # Si no es el lote activo, podríamos buscar el resumen final en la BD
+    res_final = supabase.table("deteccion_resumen").select("*").eq("lote_id", lote_id).execute()
+    if res_final.data:
+        res = res_final.data[0]
+        return {
+            "total_paltas": res["total_paltas"],
+            "cant_buenas": res["cant_buenas"],
+            "cant_defectuosas": res["cant_defectuosas"]
+        }
+
+    return {
+        "total_paltas": 0,
+        "cant_buenas": 0,
+        "cant_defectuosas": 0
+    }
