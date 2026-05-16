@@ -19,31 +19,63 @@ async def analizar_imagen(
 ):
     if not imagen.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="El archivo enviado no es una imagen válida.")
-    
+
     imagen_bytes = await imagen.read()
-    
     analizador = request.app.state.analizador
-    
+
+    def distancia(p1, p2):
+        return ((p1["x"] - p2["x"]) ** 2 + (p1["y"] - p2["y"]) ** 2) ** 0.5
+
+    def obtener_nivel_madurez(clasificacion: str):
+        texto = clasificacion.lower()
+
+        if "madurez" not in texto:
+            return None
+
+        try:
+            return int(texto.split("_")[-1])
+        except:
+            return None
+
     def procesar_y_contar(img_bytes):
-        clasificacion, confianza = analizador.execute(img_bytes)
-        
+        clasificacion, confianza, centro_x, centro_y = analizador.execute(img_bytes)
+
+        if centro_x is None or centro_y is None:
+            return
+
+        posicion_actual = {
+            "x": centro_x,
+            "y": centro_y
+        }
+
+        tolerancia = 30
+
+        ya_contada = any(
+            distancia(posicion_actual, pos_anterior) <= tolerancia
+            for pos_anterior in process_manager.posiciones_frame_anterior
+        )
+
+        process_manager.posiciones_frame_anterior = [posicion_actual]
+
+        if ya_contada:
+            return
+
         process_manager.total_paltas += 1
         process_manager.suma_confianza += confianza
-        
+
         if clasificacion.lower() == "defectuosa":
             process_manager.cant_defectuosas += 1
         else:
             process_manager.cant_buenas += 1
-            if "madurez" in clasificacion.lower():
-                try:
-                    nivel = int(clasificacion.split("_")[-1])
-                    process_manager.suma_madurez += nivel
-                    process_manager.conteo_madurez += 1
-                except:
-                    pass
+
+            nivel_madurez = obtener_nivel_madurez(clasificacion)
+
+            if nivel_madurez is not None:
+                process_manager.suma_madurez += nivel_madurez
+                process_manager.conteo_madurez += 1
 
     background_tasks.add_task(procesar_y_contar, imagen_bytes)
-    
+
     return {
         "mensaje": "Imagen recibida. Análisis en proceso en memoria.",
         "lote_id": lote_id

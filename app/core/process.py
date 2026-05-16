@@ -14,6 +14,8 @@ class ProcessManager:
         self.suma_confianza = 0.0
         self.suma_madurez = 0.0
         self.conteo_madurez = 0
+        # Guarda posiciones detectadas en el frame anterior
+        self.posiciones_frame_anterior = []
 
     def reset_contadores(self):
         self.total_paltas = 0
@@ -22,6 +24,7 @@ class ProcessManager:
         self.suma_confianza = 0.0
         self.suma_madurez = 0.0
         self.conteo_madurez = 0
+        self.posiciones_frame_anterior = []
 
     def esta_activa(self) -> bool:
         return self.proceso_captura is not None and self.proceso_captura.poll() is None

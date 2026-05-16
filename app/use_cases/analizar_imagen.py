@@ -25,12 +25,12 @@ class AnalizarImagen:
             return None
         return YOLO(MODEL_PATH)
 
-    def _procesar(self, imagen_bytes: bytes) -> tuple[str, float]:
+    def _procesar(self, imagen_bytes: bytes) -> tuple[str, float, float | None, float | None]:
         """
-        Ejecuta inferencia YOLO y devuelve clasificación + confianza.
+        Ejecuta inferencia YOLO y devuelve clasificación, confianza y centro X/Y.
         """
         if self._modelo is None:
-            return "Error: Modelo no cargado", 0.0
+            return "Error: Modelo no cargado", 0.0, None, None
 
         nparr = np.frombuffer(imagen_bytes, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -38,18 +38,22 @@ class AnalizarImagen:
         results = self._modelo.predict(source=img, conf=0.25, verbose=False)
 
         if len(results) == 0 or len(results[0].boxes) == 0:
-            return "Desconocido", 0.0
+            return "Desconocido", 0.0, None, None
 
         primera_deteccion = results[0].boxes[0]
+
         clase_id = int(primera_deteccion.cls[0])
         confianza = float(primera_deteccion.conf[0])
         nombre_clase = self._modelo.names[clase_id]
 
-        return nombre_clase, confianza
+        x1, y1, x2, y2 = primera_deteccion.xyxy[0].tolist()
+        centro_x = (x1 + x2) / 2
+        centro_y = (y1 + y2) / 2
+        return nombre_clase, confianza, centro_x, centro_y
 
-    def execute(self, imagen_bytes: bytes) -> tuple[str, float]:
+    def execute(self, imagen_bytes: bytes) -> tuple[str, float, float | None, float | None]:
         """
-        Orquesta análisis YOLO y devuelve el resultado.
+        Orquesta análisis YOLO y devuelve clasificación, confianza y centro X/Y.
         """
-        clasificacion, confianza = self._procesar(imagen_bytes)
-        return clasificacion, confianza
+        clasificacion, confianza, centro_x, centro_y = self._procesar(imagen_bytes)
+        return clasificacion, confianza, centro_x, centro_y
