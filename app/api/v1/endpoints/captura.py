@@ -38,41 +38,55 @@ async def analizar_imagen(
             return None
 
     def procesar_y_contar(img_bytes):
-        clasificacion, confianza, centro_x, centro_y = analizador.execute(img_bytes)
-
-        if centro_x is None or centro_y is None:
+        detecciones = analizador.execute(img_bytes)
+        
+        if not detecciones:
+            process_manager.posiciones_frame_anterior = []
             return
 
-        posicion_actual = {
-            "x": centro_x,
-            "y": centro_y
-        }
+        nuevas_posiciones = []
+        tolerancia = 40  # Ajustado un poco por si la banda es rápida
 
-        tolerancia = 30
+        for nombre_clase, confianza, centro_x, centro_y in detecciones:
+            posicion_actual = {"x": centro_x, "y": centro_y}
+            
+            # 1. Verificar si ya contamos esta palta en este MISMO frame (YOLO detectando doble)
+            duplicada_mismo_frame = any(
+                distancia(posicion_actual, pos_nueva) <= tolerancia
+                for pos_nueva in nuevas_posiciones
+            )
+            
+            if duplicada_mismo_frame:
+                continue # Ignoramos esta caja porque ya agarramos una en este mismo lugar
+                
+            nuevas_posiciones.append(posicion_actual)
 
-        ya_contada = any(
-            distancia(posicion_actual, pos_anterior) <= tolerancia
-            for pos_anterior in process_manager.posiciones_frame_anterior
-        )
+            # 2. Verificar si esta palta ya estaba en el frame ANTERIOR (banda transportadora)
+            ya_contada = any(
+                distancia(posicion_actual, pos_anterior) <= tolerancia
+                for pos_anterior in process_manager.posiciones_frame_anterior
+            )
 
-        process_manager.posiciones_frame_anterior = [posicion_actual]
+            if not ya_contada:
+                # ¡Es una palta nueva!
+                process_manager.total_paltas += 1
+                process_manager.suma_confianza += confianza
 
-        if ya_contada:
-            return
+                if nombre_clase.lower() == "defectuosa":
+                    process_manager.cant_defectuosas += 1
+                else:
+                    process_manager.cant_buenas += 1
+                    nivel = obtener_nivel_madurez(nombre_clase)
+                    if nivel is not None:
+                        process_manager.suma_madurez += nivel
+                        process_manager.conteo_madurez += 1
+                        
+                        # Guardar en el detalle por niveles (m1, m2...)
+                        key = f"m{nivel}"
+                        process_manager.conteo_niveles[key] = process_manager.conteo_niveles.get(key, 0) + 1
 
-        process_manager.total_paltas += 1
-        process_manager.suma_confianza += confianza
-
-        if clasificacion.lower() == "defectuosa":
-            process_manager.cant_defectuosas += 1
-        else:
-            process_manager.cant_buenas += 1
-
-            nivel_madurez = obtener_nivel_madurez(clasificacion)
-
-            if nivel_madurez is not None:
-                process_manager.suma_madurez += nivel_madurez
-                process_manager.conteo_madurez += 1
+        # Actualizar la memoria de posiciones para el SIGUIENTE frame
+        process_manager.posiciones_frame_anterior = nuevas_posiciones
 
     background_tasks.add_task(procesar_y_contar, imagen_bytes)
 
@@ -126,14 +140,14 @@ async def detener_captura():
     # 1. Detener el proceso físico
     process_manager.detener_captura()
 
-    # 2. Calcular resumen final desde los contadores en memoria
+    # 2. Calcular resumen final
     total = process_manager.total_paltas
     buenas = process_manager.cant_buenas
     malas = process_manager.cant_defectuosas
     conf_promedio = (process_manager.suma_confianza / total) if total > 0 else 0
     madurez_promedio = (process_manager.suma_madurez / process_manager.conteo_madurez) if process_manager.conteo_madurez > 0 else 0
     
-    # 3. Guardar en deteccion_resumen (UNA SOLA VEZ)
+    # 3. Guardar en deteccion_resumen (Incluyendo el JSON dinámico)
     resumen_data = {
         "lote_id": lote_id,
         "total_paltas": total,
@@ -142,6 +156,7 @@ async def detener_captura():
         "porcentaje_buenas": (buenas / total * 100) if total > 0 else 0,
         "porcentaje_defectuosas": (malas / total * 100) if total > 0 else 0,
         "madurez_promedio": madurez_promedio,
+        "niveles_madurez": process_manager.conteo_niveles,  # JSON dinámico: solo niveles encontrados
         "confianza_avg": conf_promedio,
         "finalizado_en": __import__('datetime').datetime.now().isoformat()
     }

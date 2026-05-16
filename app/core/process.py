@@ -14,6 +14,8 @@ class ProcessManager:
         self.suma_confianza = 0.0
         self.suma_madurez = 0.0
         self.conteo_madurez = 0
+        # Guarda conteo por nivel: {"m1": 10, "m2": 5, ...}
+        self.conteo_niveles = {}
         # Guarda posiciones detectadas en el frame anterior
         self.posiciones_frame_anterior = []
 
@@ -24,6 +26,7 @@ class ProcessManager:
         self.suma_confianza = 0.0
         self.suma_madurez = 0.0
         self.conteo_madurez = 0
+        self.conteo_niveles = {}
         self.posiciones_frame_anterior = []
 
     def esta_activa(self) -> bool:
