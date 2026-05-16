@@ -1,13 +1,17 @@
 from fastapi import APIRouter, HTTPException
 from app.schemas.lote import LoteCreate
 from app.core.database import supabase
+from app.core.nomenclatura import generar_codigo_lote
 
 router = APIRouter()
 
 @router.post("/", status_code=201)
 async def crear_lote(lote: LoteCreate):
+    # Generar el código de lote automáticamente en el backend
+    codigo_autogenerado = generar_codigo_lote()
+    
     data = {
-        "codigo_lote": lote.codigo_lote,
+        "codigo_lote": codigo_autogenerado,
         "proveedor": lote.proveedor,
         "lugar_origen": lote.lugar_origen,
         "fecha_cosecha": lote.fecha_cosecha.isoformat() if lote.fecha_cosecha else None,

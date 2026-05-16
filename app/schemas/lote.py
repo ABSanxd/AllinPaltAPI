@@ -5,7 +5,7 @@ from app.schemas.enums import EstadoLote
 
 
 class LoteCreate(BaseModel):
-    codigo_lote: str = Field(..., min_length=3, max_length=50)
+    codigo_lote: Optional[str] = Field(default=None, max_length=50)
     proveedor: str = Field(..., min_length=2, max_length=120)
     lugar_origen: str = Field(..., min_length=2, max_length=120)
     fecha_cosecha: Optional[date] = None
