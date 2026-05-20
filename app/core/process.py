@@ -18,6 +18,8 @@ class ProcessManager:
         self.conteo_niveles = {}
         # Guarda posiciones detectadas en el frame anterior
         self.posiciones_frame_anterior = []
+        #Guardará los bytes de la imagen con las cajas dibujadas
+        self.ultimo_frame_dibujado = None
 
     def reset_contadores(self):
         self.total_paltas = 0
@@ -28,6 +30,7 @@ class ProcessManager:
         self.conteo_madurez = 0
         self.conteo_niveles = {}
         self.posiciones_frame_anterior = []
+        self.ultimo_frame_dibujado = None # Resetear al iniciar nuevo lote
 
     def esta_activa(self) -> bool:
         return self.proceso_captura is not None and self.proceso_captura.poll() is None

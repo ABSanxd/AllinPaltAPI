@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 from app.core.database import supabase
+from app.core.process import process_manager # Importamos el manager para guardar el frame
 
 _BASE = os.path.dirname(__file__)
 MODEL_PATH = os.path.join(_BASE, "..", "ml_models", "best.pt")
@@ -36,6 +37,17 @@ class AnalizarImagen:
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
         results = self._modelo.predict(source=img, conf=0.25, verbose=False)
+        
+        # NUEVO: Dibujar cajas y actualizar el feed en tiempo real
+        if len(results) > 0:
+            # .plot() dibuja automáticamente las cajas de YOLO sobre la imagen
+            img_dibujada = results[0].plot() 
+            
+            # Codificamos la imagen pintada a formato JPEG para la transmisión web
+            success, buffer = cv2.imencode(".jpg", img_dibujada)
+            if success:
+                # Guardamos los bytes resultantes en el manager global
+                process_manager.ultimo_frame_dibujado = buffer.tobytes()
 
         if len(results) == 0 or len(results[0].boxes) == 0:
             return []
