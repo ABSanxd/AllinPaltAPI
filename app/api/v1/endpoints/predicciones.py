@@ -70,6 +70,37 @@ async def generar_prediccion_lote(lote_id: UUID):
         date.fromisoformat(fecha_cosecha) if fecha_cosecha else None
     )
 
+    # Regla Directa para lotes 100% defectuosos (madurez promedio = 0)
+    if float(madurez) < 1.0:
+        prediccion_data = {
+            "lote_id": lote_id_str,
+            "vida_util_estimada": 0,
+            "riesgo_deterioro": "ALTO",
+            "prioridad_venta": "ALTA",
+            "recomendacion": "Lote con 100% de descarte. No apto para exportación ni almacenamiento. Descartar de inmediato o derivar a procesamiento secundario.",
+            "temperatura_ambiente": float(temperatura),
+            "madurez_promedio": 0.0,
+            "dias_cosecha": dias_cosecha,
+        }
+
+        insert_response = (
+            supabase.table("predicciones")
+            .insert(prediccion_data)
+            .execute()
+        )
+
+        if not insert_response.data:
+            raise HTTPException(
+                status_code=500,
+                detail="No se pudo guardar la predicción para el lote defectuoso."
+            )
+
+        return {
+            "mensaje": "Lote con 100% de descarte. Predicción directa guardada.",
+            "algoritmo": "Regla de Negocio (Bypass)",
+            "prediccion": insert_response.data[0],
+        }
+
     # 4. Ejecutar predicción con Random Forest
     try:
         resultado = calcular_prediccion(
@@ -113,7 +144,7 @@ async def generar_prediccion_lote(lote_id: UUID):
 @router.get("/{lote_id}")
 async def consultar_predicciones_lote(lote_id: UUID):
     """
-    Consulta las predicciones guardadas de un lote.
+    Consulta la predicción más reciente guardada de un lote.
     """
 
     lote_id_str = str(lote_id)
@@ -122,10 +153,12 @@ async def consultar_predicciones_lote(lote_id: UUID):
         supabase.table("predicciones")
         .select("*")
         .eq("lote_id", lote_id_str)
+        .order("creado_at", desc=True)
+        .limit(1)
         .execute()
     )
 
-    return {
-        "lote_id": lote_id_str,
-        "predicciones": response.data,
-    }
+    if response.data:
+        return response.data[0]
+    
+    return {}

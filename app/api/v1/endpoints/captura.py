@@ -4,7 +4,7 @@ import subprocess
 import asyncio
 import time
 from datetime import datetime
-from fastapi import APIRouter, UploadFile, File, HTTPException, Request, Form
+from fastapi import APIRouter, UploadFile, File, HTTPException, Request, Form, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from app.core.process import process_manager
 from app.core.config import settings
@@ -16,9 +16,10 @@ router = APIRouter()
 # Variable global en la RAM para almacenar el último frame que llega de la cámara
 ultimo_frame_procesado = None
 
-@router.post("/analizar-imagen")
-def analizar_imagen(
+@router.post("/analizar-imagen", status_code=202)
+async def analizar_imagen(
     request: Request,
+    background_tasks: BackgroundTasks,
     imagen: UploadFile = File(...),
     lote_id: str = Form(...),
 ):
@@ -26,7 +27,7 @@ def analizar_imagen(
     if not imagen.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="El archivo enviado no es una imagen válida.")
 
-    imagen_bytes = imagen.file.read()
+    imagen_bytes = await imagen.read()
     analizador = request.app.state.analizador
 
     # Auxiliares de tracking
@@ -42,58 +43,59 @@ def analizar_imagen(
         except:
             return None
 
-    # Ejecutar inferencia de YOLO
-    detecciones = analizador.execute(imagen_bytes)
-    
-    # GUARDAR EL FRAME EN MEMORIA
-    # Si tu analizador ya dibuja las cajas sobre la imagen y devuelve bytes, asigna ese objeto.
-    # Si no, guardamos los bytes limpios que envió la cámara.
-    ultimo_frame_procesado = imagen_bytes 
-    
-    if not detecciones:
-        process_manager.posiciones_frame_anterior = []
-    else:
-        nuevas_posiciones = []
-        tolerancia = 40  
+    def procesar_y_contar(img_bytes):
+        global ultimo_frame_procesado
+        # Ejecutar inferencia de YOLO asíncronamente
+        detecciones = analizador.execute(img_bytes)
+        
+        # GUARDAR EL FRAME EN MEMORIA
+        ultimo_frame_procesado = img_bytes 
+        
+        if not detecciones:
+            process_manager.posiciones_frame_anterior = []
+        else:
+            nuevas_posiciones = []
+            tolerancia = 40  
 
-        for nombre_clase, confianza, centro_x, centro_y in detecciones:
-            posicion_actual = {"x": centro_x, "y": centro_y}
-            
-            duplicada_mismo_frame = any(
-                distancia(posicion_actual, pos_nueva) <= tolerancia
-                for pos_nueva in nuevas_posiciones
-            )
-            if duplicada_mismo_frame:
-                continue 
+            for nombre_clase, confianza, centro_x, centro_y in detecciones:
+                posicion_actual = {"x": centro_x, "y": centro_y}
                 
-            nuevas_posiciones.append(posicion_actual)
+                duplicada_mismo_frame = any(
+                    distancia(posicion_actual, pos_nueva) <= tolerancia
+                    for pos_nueva in nuevas_posiciones
+                )
+                if duplicada_mismo_frame:
+                    continue 
+                    
+                nuevas_posiciones.append(posicion_actual)
 
-            ya_contada = any(
-                distancia(posicion_actual, pos_anterior) <= tolerancia
-                for pos_anterior in process_manager.posiciones_frame_anterior
-            )
+                ya_contada = any(
+                    distancia(posicion_actual, pos_anterior) <= tolerancia
+                    for pos_anterior in process_manager.posiciones_frame_anterior
+                )
 
-            if not ya_contada:
-                process_manager.total_paltas += 1
-                process_manager.suma_confianza += confianza
+                if not ya_contada:
+                    process_manager.total_paltas += 1
+                    process_manager.suma_confianza += confianza
 
-                if nombre_clase.lower() == "defectuosa":
-                    process_manager.cant_defectuosas += 1
-                else:
-                    process_manager.cant_buenas += 1
-                    nivel = obtener_nivel_madurez(nombre_clase)
-                    if nivel is not None:
-                        process_manager.suma_madurez += nivel
-                        process_manager.conteo_madurez += 1
-                        key = f"m{nivel}"
-                        process_manager.conteo_niveles[key] = process_manager.conteo_niveles.get(key, 0) + 1
+                    if nombre_clase.lower() == "defectuosa":
+                        process_manager.cant_defectuosas += 1
+                    else:
+                        process_manager.cant_buenas += 1
+                        nivel = obtener_nivel_madurez(nombre_clase)
+                        if nivel is not None:
+                            process_manager.suma_madurez += nivel
+                            process_manager.conteo_madurez += 1
+                            key = f"m{nivel}"
+                            process_manager.conteo_niveles[key] = process_manager.conteo_niveles.get(key, 0) + 1
 
-        process_manager.posiciones_frame_anterior = nuevas_posiciones
+            process_manager.posiciones_frame_anterior = nuevas_posiciones
+
+    background_tasks.add_task(procesar_y_contar, imagen_bytes)
 
     return {
-        "status": "procesado",
-        "lote_id": lote_id,
-        "total_actual": process_manager.total_paltas
+        "status": "procesando",
+        "lote_id": lote_id
     }
 
 @router.post("/iniciar-captura")
@@ -119,7 +121,7 @@ async def iniciar_captura(lote_id: str):
         [sys.executable, "-u", script_path, "--lote_id", lote_id],
         stdout=log_file,
         stderr=subprocess.STDOUT,
-        env={**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"},
+        env={**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8", "IP_CAMARA_CELULAR": settings.IP_CAMARA_CELULAR},
     )
     process_manager.proceso_captura = proceso
     process_manager.log_file = log_file
@@ -162,11 +164,21 @@ async def detener_captura():
     try:
         supabase.table("deteccion_resumen").insert(resumen_data).execute()
         supabase.table("lotes").update({"estado": EstadoLote.FINALIZADO.value}).eq("id", lote_id).execute()
+        
+        # Generar predicción ML automática para el lote
+        from app.api.v1.endpoints.predicciones import generar_prediccion_lote
+        from uuid import UUID
+        try:
+            await generar_prediccion_lote(UUID(lote_id))
+            print(f"[AUTO-PREDICCION] Predicción generada exitosamente para lote: {lote_id}")
+        except Exception as pred_err:
+            print(f"[ERROR AUTO-PREDICCION] Error al generar la predicción: {pred_err}")
+            
     except Exception as e:
         print(f"[ERROR DB] No se guardó el resumen: {e}")
     
     process_manager.lote_id_activo = None
-    return {"mensaje": "Captura detenida correctamente.", "pid": pid}
+    return {"mensaje": "Captura detenida y predicción generada correctamente.", "pid": pid}
 
 @router.get("/monitor/{lote_id}")
 async def monitor_lote(lote_id: str, ultimas_lineas: int = 10):
@@ -195,28 +207,13 @@ async def monitor_lote(lote_id: str, ultimas_lineas: int = 10):
         "lote_id": lote_id
     }
 
-@router.get("/video-stream")
-async def video_stream():
-    async def generar_frames():
-        ultimo_frame_enviado = None
-        
-        while True:
-            frame = process_manager.ultimo_frame_dibujado
-            
-            # Si hay un frame y es diferente al que ya enviamos, lo transmitimos
-            if frame is not None and frame != ultimo_frame_enviado:
-                ultimo_frame_enviado = frame
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-                
-                # Le damos un respiro corto de 30 FPS teóricos (~0.03s)
-                await asyncio.sleep(0.03)
-            else:
-                # Si el modelo aún no procesa la siguiente imagen de la banda,
-                # esperamos un poco más para no estresar la CPU ni el canal de red
-                await asyncio.sleep(0.05)
+@router.get("/config-camara")
+async def obtener_config_camara():
+    """
+    Devuelve la URL de la cámara celular configurada en el archivo .env.
+    """
+    return {"ip_camera_url": settings.IP_CAMARA_CELULAR}
 
-    return StreamingResponse(
-        generar_frames(), 
-        media_type="multipart/x-mixed-replace; boundary=frame"
-    )
+@router.get("/")
+async def root_captura():
+    return {"mensaje": "Módulo de captura activo"}

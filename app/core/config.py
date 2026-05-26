@@ -11,6 +11,7 @@ class Settings:
     
     SUPABASE_URL: str = os.getenv("SUPABASE_URL")
     SUPABASE_SERVICE_ROLE_KEY: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    IP_CAMARA_CELULAR: str = os.getenv("IP_CAMARA_CELULAR", "0")
     
     # Ruta base para el log de captura
     _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

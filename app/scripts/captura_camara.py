@@ -24,8 +24,15 @@ import requests
 # ── Configuración por defecto ─────────────────────────────────────────────────
 DEFAULT_URL       = "http://127.0.0.1:8000"
 DEFAULT_INTERVALO = 1          # segundos entre capturas
-CAMERA_INDEX      = 0          # índice de cámara (0 = primera disponible)
-JPEG_CALIDAD      = 85         # calidad JPEG para reducir payload
+JPEG_CALIDAD      = 60         # calidad JPEG reducida para optimizar peso y velocidad
+
+# Leer la dirección de la cámara desde las variables de entorno pasadas por la API
+import os
+_ENV_CAMARA = os.getenv("IP_CAMARA_CELULAR", "0")
+try:
+    CAMERA_INDEX = int(_ENV_CAMARA)
+except ValueError:
+    CAMERA_INDEX = _ENV_CAMARA
 
 
 def _leer_args() -> argparse.Namespace:
@@ -56,57 +63,69 @@ def _enviar_imagen(api_url: str, imagen_bytes: bytes, lote_id: str) -> None:
         print(f"[ERROR] Error de red: {e}")
 
 
-def _capturar_frame() -> bytes | None:
+def _capturar_frame(cap: cv2.VideoCapture) -> bytes | None:
     """
-    Intenta abrir la cámara, capturar un frame y devolverlo como bytes JPEG.
-    Retorna None si la cámara no está disponible o el frame falla.
+    Lee un frame de la cámara ya abierta, lo redimensiona a 640x480 y lo devuelve en bytes JPEG.
     """
-    cap = cv2.VideoCapture(CAMERA_INDEX)
-    try:
-        if not cap.isOpened():
-            return None
+    if not cap.isOpened():
+        return None
 
-        ret, frame = cap.read()
-        if not ret or frame is None:
-            return None
+    ret, frame = cap.read()
+    if not ret or frame is None:
+        return None
 
-        encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_CALIDAD]
-        success, buffer = cv2.imencode(".jpg", frame, encode_params)
-        if not success:
-            return None
+    # Redimensionar el frame a 640x480 para aligerar la transmisión y el modelo YOLO
+    h, w = frame.shape[:2]
+    if w > 640 or h > 480:
+        frame = cv2.resize(frame, (640, 480), interpolation=cv2.INTER_AREA)
 
-        return buffer.tobytes()
-    finally:
-        cap.release()
+    encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_CALIDAD]
+    success, buffer = cv2.imencode(".jpg", frame, encode_params)
+    if not success:
+        return None
+
+    return buffer.tobytes()
 
 
 def bucle_captura(api_url: str, intervalo: float, lote_id: str) -> None:
     """
-    Bucle principal: captura y envía indefinidamente.
-    Nunca lanza excepción no controlada; siempre reintenta.
+    Bucle principal: mantiene abierta la cámara y captura periódicamente.
     """
     print(f"[START] Captura continua -> {api_url}/analizar-imagen")
     print(f"[INFO] Lote ID: {lote_id} | Intervalo: {intervalo}s")
 
-    while True:
-        inicio = time.monotonic()
+    cap = cv2.VideoCapture(CAMERA_INDEX)
+    try:
+        # Dar un breve respiro para inicialización de hardware en Windows
+        time.sleep(0.5)
 
-        try:
-            imagen_bytes = _capturar_frame()
+        while True:
+            inicio = time.monotonic()
 
-            if imagen_bytes is None:
-                print("[WARN] Camara no disponible o frame invalido. Reintentando...")
-            else:
-                _enviar_imagen(api_url, imagen_bytes, lote_id)
+            try:
+                if not cap.isOpened():
+                    print("[WARN] Intentando reabrir cámara...")
+                    cap.open(CAMERA_INDEX)
+                    time.sleep(0.5)
 
-        except Exception as e:
-            # Captura cualquier error inesperado para no romper el bucle
-            print(f"[ERROR] Error inesperado: {e}")
+                imagen_bytes = _capturar_frame(cap)
 
-        # Respetar el intervalo descontando el tiempo de procesamiento
-        transcurrido = time.monotonic() - inicio
-        pausa = max(0.0, intervalo - transcurrido)
-        time.sleep(pausa)
+                if imagen_bytes is None:
+                    print("[WARN] Camara no disponible o frame invalido. Reintentando...")
+                else:
+                    _enviar_imagen(api_url, imagen_bytes, lote_id)
+
+            except Exception as e:
+                print(f"[ERROR] Error inesperado en el bucle: {e}")
+
+            # Respetar el intervalo descontando el tiempo de procesamiento
+            transcurrido = time.monotonic() - inicio
+            pausa = max(0.0, intervalo - transcurrido)
+            time.sleep(pausa)
+
+    finally:
+        print("[INFO] Liberando cámara...")
+        cap.release()
 
 
 if __name__ == "__main__":
