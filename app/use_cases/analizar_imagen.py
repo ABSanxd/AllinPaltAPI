@@ -36,7 +36,7 @@ class AnalizarImagen:
         nparr = np.frombuffer(imagen_bytes, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-        results = self._modelo.predict(source=img, conf=0.25, verbose=False)
+        results = self._modelo.predict(source=img, conf=0.50, verbose=False)
         
 
         if len(results) == 0 or len(results[0].boxes) == 0:
