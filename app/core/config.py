@@ -16,5 +16,9 @@ class Settings:
     # Ruta base para el log de captura
     _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     LOG_CAPTURA_PATH: str = os.path.join(_ROOT, "captura_camara.log")
+    
+    # Clima - OpenWeatherMap
+    OPENWEATHER_API_KEY: str = os.getenv("OPENWEATHER_API_KEY", "")
+
 
 settings = Settings()
