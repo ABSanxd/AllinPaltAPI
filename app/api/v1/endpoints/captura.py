@@ -59,7 +59,7 @@ async def analizar_imagen(
             tolerancia = 40  
 
             for nombre_clase, confianza, centro_x, centro_y in detecciones:
-                posicion_actual = {"x": centro_x, "y": centro_y}
+                posicion_actual = {"x": centro_x, "y": centro_y, "clase": nombre_clase}
                 
                 duplicada_mismo_frame = any(
                     distancia(posicion_actual, pos_nueva) <= tolerancia
@@ -70,8 +70,9 @@ async def analizar_imagen(
                     
                 nuevas_posiciones.append(posicion_actual)
 
+                # Se considera ya contada solo si está en la misma posición Y tiene la misma clasificación/madurez
                 ya_contada = any(
-                    distancia(posicion_actual, pos_anterior) <= tolerancia
+                    distancia(posicion_actual, pos_anterior) <= tolerancia and posicion_actual["clase"] == pos_anterior.get("clase")
                     for pos_anterior in process_manager.posiciones_frame_anterior
                 )
 
