@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 
 from app.core.database import supabase
 from app.services.prediccion import calcular_dias_cosecha, calcular_prediccion
+from app.services.clima import obtener_clima_futuro
 
 
 router = APIRouter()
@@ -21,7 +22,7 @@ async def generar_prediccion_lote(lote_id: UUID):
     # 1. Obtener datos generales del lote
     lote_response = (
         supabase.table("lotes")
-        .select("id, temperatura_ambiente, fecha_cosecha")
+        .select("id, temperatura_ambiente, fecha_cosecha, lugar_origen")
         .eq("id", lote_id_str)
         .execute()
     )
@@ -30,6 +31,10 @@ async def generar_prediccion_lote(lote_id: UUID):
         raise HTTPException(status_code=404, detail="Lote no encontrado.")
 
     lote = lote_response.data[0]
+
+    # Obtener el clima futuro para la ubicación de la planta de procesamiento (por defecto Lima)
+    clima_data = obtener_clima_futuro("Lima")
+    temp_futura = clima_data["promedio"] if isinstance(clima_data, dict) else clima_data
 
     # 2. Obtener la madurez promedio calculada durante la captura
     resumen_response = (
@@ -76,11 +81,12 @@ async def generar_prediccion_lote(lote_id: UUID):
             "lote_id": lote_id_str,
             "vida_util_estimada": 0,
             "riesgo_deterioro": "ALTO",
-            "prioridad_venta": "ALTA",
+            "prioridad_venta": "DESCARTE",
             "recomendacion": "Lote con 100% de descarte. No apto para exportación ni almacenamiento. Descartar de inmediato o derivar a procesamiento secundario.",
             "temperatura_ambiente": float(temperatura),
             "madurez_promedio": 0.0,
             "dias_cosecha": dias_cosecha,
+            "temperatura_climatica_futura": temp_futura,
         }
 
         insert_response = (
@@ -120,6 +126,7 @@ async def generar_prediccion_lote(lote_id: UUID):
         "temperatura_ambiente": float(temperatura),
         "madurez_promedio": float(madurez),
         "dias_cosecha": dias_cosecha,
+        "temperatura_climatica_futura": temp_futura,
     }
 
     insert_response = (
@@ -158,7 +165,28 @@ async def consultar_predicciones_lote(lote_id: UUID):
         .execute()
     )
 
-    if response.data:
-        return response.data[0]
+    if not response.data:
+        return {}
     
-    return {}
+    prediccion = response.data[0]
+
+    # Consultar el resumen de detección para calcular el % de defectuosas
+    resumen_resp = (
+        supabase.table("deteccion_resumen")
+        .select("total_paltas, cant_defectuosas")
+        .eq("lote_id", lote_id_str)
+        .order("finalizado_en", desc=True)
+        .limit(1)
+        .execute()
+    )
+
+    pct_defectuosas = 0.0
+    if resumen_resp.data:
+        resumen = resumen_resp.data[0]
+        total = resumen.get("total_paltas", 0)
+        defectuosas = resumen.get("cant_defectuosas", 0)
+        if total > 0:
+            pct_defectuosas = (defectuosas / total) * 100
+
+    prediccion["porcentaje_defectuosas"] = pct_defectuosas
+    return prediccion

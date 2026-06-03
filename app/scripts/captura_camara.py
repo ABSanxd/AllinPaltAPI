@@ -23,7 +23,7 @@ import requests
 
 # ── Configuración por defecto ─────────────────────────────────────────────────
 DEFAULT_URL       = "http://127.0.0.1:8000"
-DEFAULT_INTERVALO = 1          # segundos entre capturas
+DEFAULT_INTERVALO = 1.5          # segundos entre capturas (balanceado para CPU y tiempo real)
 JPEG_CALIDAD      = 60         # calidad JPEG reducida para optimizar peso y velocidad
 
 # Leer la dirección de la cámara desde las variables de entorno pasadas por la API

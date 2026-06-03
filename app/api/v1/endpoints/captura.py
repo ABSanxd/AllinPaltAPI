@@ -10,6 +10,7 @@ from app.core.process import process_manager
 from app.core.config import settings
 from app.core.database import supabase
 from app.schemas.enums import EstadoLote
+from app.services.clima import obtener_clima_futuro
 
 router = APIRouter()
 
@@ -213,6 +214,17 @@ async def obtener_config_camara():
     Devuelve la URL de la cámara celular configurada en el archivo .env.
     """
     return {"ip_camera_url": settings.IP_CAMARA_CELULAR}
+
+@router.get("/clima-actual")
+async def obtener_clima_actual_planta(
+    ciudad: str = None,
+    lat: float = None,
+    lon: float = None
+):
+    """
+    Retorna la temperatura actual y promedio del clima para la planta.
+    """
+    return obtener_clima_futuro(lugar_origen=ciudad, lat=lat, lon=lon)
 
 @router.get("/")
 async def root_captura():

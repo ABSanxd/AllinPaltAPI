@@ -6,69 +6,74 @@ logger = logging.getLogger(__name__)
 
 OPENWEATHER_API_KEY = settings.OPENWEATHER_API_KEY
 OPENWEATHER_FORECAST_URL = "http://api.openweathermap.org/data/2.5/forecast"
+OPENWEATHER_CURRENT_URL = "http://api.openweathermap.org/data/2.5/weather"
 TEMPERATURA_FALLBACK = 20.0
 
 
-def obtener_clima_futuro(lugar_origen: str) -> float:
+def obtener_clima_futuro(lugar_origen: str = None, lat: float = None, lon: float = None) -> dict:
     """
-    Obtiene el promedio de temperatura climática futura para los próximos 5 días
-    desde la API gratuita de OpenWeatherMap (endpoint /forecast).
-
-    Args:
-        lugar_origen: Nombre de la ciudad o lugar de origen del lote
-                      (ej: "Lima", "Ica", "Trujillo").
+    Obtiene la temperatura actual en tiempo real y el promedio de temperatura climática futura para los próximos 5 días
+    desde la API de OpenWeatherMap.
 
     Returns:
-        Promedio de temperaturas pronosticadas en grados Celsius.
-        Retorna 20.0 como fallback si la API falla o el lugar no es encontrado.
+        Diccionario con {"actual": float, "promedio": float}
     """
-    if not lugar_origen or not lugar_origen.strip():
-        logger.warning("lugar_origen vacío, usando temperatura fallback.")
-        return TEMPERATURA_FALLBACK
+    fallback = {"actual": TEMPERATURA_FALLBACK, "promedio": TEMPERATURA_FALLBACK}
 
     params = {
-        "q": lugar_origen.strip(),
         "appid": OPENWEATHER_API_KEY,
         "units": "metric",  # Celsius
         "lang": "es",
     }
 
+    if lat is not None and lon is not None:
+        params["lat"] = lat
+        params["lon"] = lon
+        loc_str = f"Coordenadas ({lat}, {lon})"
+    elif lugar_origen and lugar_origen.strip():
+        params["q"] = lugar_origen.strip()
+        loc_str = lugar_origen.strip()
+    else:
+        logger.warning("No se proporcionó ciudad ni coordenadas, usando temperatura fallback.")
+        return fallback
+
+    actual_temp = TEMPERATURA_FALLBACK
+    promedio = TEMPERATURA_FALLBACK
+
+    # 1. Obtener clima actual en tiempo real
     try:
-        response = requests.get(OPENWEATHER_FORECAST_URL, params=params, timeout=5)
+        response_curr = requests.get(OPENWEATHER_CURRENT_URL, params=params, timeout=5)
+        if response_curr.status_code == 200:
+            data_curr = response_curr.json()
+            if "main" in data_curr and "temp" in data_curr["main"]:
+                actual_temp = data_curr["main"]["temp"]
+        elif response_curr.status_code == 401:
+            logger.error("API key de OpenWeatherMap inválida o no autorizada al consultar clima actual.")
+            return fallback
+    except Exception as e:
+        logger.error("Error al consultar clima actual: %s", e)
 
-        if response.status_code == 200:
-            data = response.json()
-            temperaturas = [item["main"]["temp"] for item in data["list"]]
+    # 2. Obtener pronóstico de 5 días para calcular promedio futuro
+    try:
+        response_fore = requests.get(OPENWEATHER_FORECAST_URL, params=params, timeout=5)
+        if response_fore.status_code == 200:
+            data_fore = response_fore.json()
+            temperaturas = [item["main"]["temp"] for item in data_fore.get("list", [])]
+            if temperaturas:
+                promedio = sum(temperaturas) / len(temperaturas)
+            else:
+                promedio = actual_temp
+        elif response_fore.status_code == 401:
+            logger.error("API key de OpenWeatherMap inválida o no autorizada al consultar pronóstico.")
+            return fallback
+    except Exception as e:
+        logger.error("Error al consultar pronóstico: %s", e)
+        promedio = actual_temp
 
-            if not temperaturas:
-                logger.warning("La API no retornó registros de temperatura para '%s'.", lugar_origen)
-                return TEMPERATURA_FALLBACK
-
-            promedio = sum(temperaturas) / len(temperaturas)
-            logger.info(
-                "Temperatura futura promedio para '%s': %.2f°C (basada en %d registros).",
-                lugar_origen,
-                promedio,
-                len(temperaturas),
-            )
-            return round(promedio, 2)
-
-        elif response.status_code == 404:
-            logger.warning("Lugar '%s' no encontrado en OpenWeatherMap.", lugar_origen)
-        elif response.status_code == 401:
-            logger.error("API key de OpenWeatherMap inválida o no autorizada.")
-        else:
-            logger.error(
-                "Error inesperado de OpenWeatherMap. Status: %d, Respuesta: %s",
-                response.status_code,
-                response.text,
-            )
-
-    except requests.exceptions.Timeout:
-        logger.error("Timeout al consultar OpenWeatherMap para '%s'.", lugar_origen)
-    except requests.exceptions.ConnectionError:
-        logger.error("Error de conexión al consultar OpenWeatherMap.")
-    except (KeyError, ZeroDivisionError, ValueError) as e:
-        logger.error("Error al procesar respuesta de OpenWeatherMap: %s", e)
-
-    return TEMPERATURA_FALLBACK
+    logger.info(
+        "Clima para '%s': Actual %.2f°C | Promedio Futuro %.2f°C.",
+        loc_str,
+        actual_temp,
+        promedio,
+    )
+    return {"actual": round(actual_temp, 2), "promedio": round(promedio, 2)}

@@ -36,7 +36,8 @@ class AnalizarImagen:
         nparr = np.frombuffer(imagen_bytes, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-        results = self._modelo.predict(source=img, conf=0.50, verbose=False)
+        # Ejecutamos con un umbral base bajo de 0.45 para capturar todas las posibles detecciones
+        results = self._modelo.predict(source=img, conf=0.45, verbose=False)
         
 
         if len(results) == 0 or len(results[0].boxes) == 0:
@@ -47,6 +48,14 @@ class AnalizarImagen:
             clase_id = int(box.cls[0])
             confianza = float(box.conf[0])
             nombre_clase = self._modelo.names[clase_id]
+
+            # Filtro dinámico por clase para mejorar la precisión y evitar falsos positivos
+            if nombre_clase.lower() == "defectuosa":
+                if confianza < 0.68:  # Exigir confianza alta para clasificar como defectuosa
+                    continue
+            else:
+                if confianza < 0.48:  # Confianza más permisiva para detectar los grados de madurez
+                    continue
 
             x1, y1, x2, y2 = box.xyxy[0].tolist()
             centro_x = (x1 + x2) / 2
