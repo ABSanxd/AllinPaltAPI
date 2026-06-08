@@ -4,6 +4,8 @@ from contextlib import asynccontextmanager
 from app.api.v1.api import api_router
 from app.use_cases.analizar_imagen import AnalizarImagen
 from app.core.process import process_manager
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -31,6 +33,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# ── Manejo de Errores de Validación ─────────────────────────────────────────
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    errores = []
+    for error in exc.errors():
+        errores.append(error.get('msg', 'Error de validación'))
+    return JSONResponse(
+        status_code=422,
+        content={"detail": " | ".join(errores)}
+    )
 
 # ── Registro de Rutas ─────────────────────────────────────────────────────────
 app.include_router(api_router, prefix="/api/v1")
@@ -38,3 +50,4 @@ app.include_router(api_router, prefix="/api/v1")
 @app.get("/")
 async def root():
     return {"message": "AllinPalt API activa 🥑"}
+
