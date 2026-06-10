@@ -31,7 +31,7 @@ async def listar_lotes():
     """
     response = supabase.table("lotes")\
         .select("*, deteccion_resumen(*)")\
-        .order("id", desc=True)\
+        .order("fecha_ingreso_planta", desc=True)\
         .execute()
     return {"lotes": response.data}
 

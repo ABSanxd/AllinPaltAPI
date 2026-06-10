@@ -35,7 +35,7 @@ async def generar_recomendacion_lote(lote_id: UUID):
 
     resumen_response = (
         supabase.table("deteccion_resumen")
-        .select("madurez_promedio, finalizado_en")
+        .select("madurez_promedio, finalizado_en, porcentaje_defectuosas")
         .eq("lote_id", lote_id_str)
         .order("finalizado_en", desc=True)
         .limit(1)
@@ -148,11 +148,14 @@ async def generar_recomendacion_lote(lote_id: UUID):
             detail="No se pudo guardar la recomendación en Supabase.",
         )
 
+    prediccion_data = update_response.data[0]
+    prediccion_data["porcentaje_defectuosas"] = resumen.get("porcentaje_defectuosas")
+
     return {
         "mensaje": "Recomendación generada y guardada correctamente.",
         "lote_id": lote_id_str,
         "resultado": resultado,
-        "prediccion_actualizada": update_response.data[0],
+        "prediccion_actualizada": prediccion_data,
         "ajuste_por_prediccion_ml": {
             "vida_util_estimada": vida_util_estimada,
             "riesgo_deterioro": riesgo_deterioro,
