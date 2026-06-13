@@ -169,10 +169,19 @@ async def detener_captura():
         
         # Generar predicción ML automática para el lote
         from app.api.v1.endpoints.predicciones import generar_prediccion_lote
+        from app.api.v1.endpoints.recomendaciones import generar_recomendacion_lote
         from uuid import UUID
         try:
             await generar_prediccion_lote(UUID(lote_id))
             print(f"[AUTO-PREDICCION] Predicción generada exitosamente para lote: {lote_id}")
+            
+            # Generar recomendación del Sistema Experto (pyDatalog)
+            try:
+                await generar_recomendacion_lote(UUID(lote_id))
+                print(f"[AUTO-RECOMENDACION] Recomendación generada exitosamente para lote: {lote_id}")
+            except Exception as rec_err:
+                print(f"[ERROR AUTO-RECOMENDACION] Error al generar recomendación: {rec_err}")
+                
         except Exception as pred_err:
             print(f"[ERROR AUTO-PREDICCION] Error al generar la predicción: {pred_err}")
             

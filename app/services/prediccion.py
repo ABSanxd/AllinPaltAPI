@@ -134,5 +134,5 @@ def calcular_prediccion(
         "madurez_usada": float(madurez),
         "dias_cosecha": int(dias_cosecha),
         "algoritmo": "Random Forest",
-        "dataset": "sintetico_inicial",
+        "dataset": "tecnico_parametrizado_postcosecha",
     }
